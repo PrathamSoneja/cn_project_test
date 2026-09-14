@@ -1,10 +1,10 @@
 import sys
-sys.path.append(r"D:\cn_project_test\Soroush\traffic_engineering")
-sys.path.append(r"D:\cn_project_test\Soroush")
+sys.path.append(r"C:\Users\Pratham Soneja\Documents\BITS Sem 1\ADV CN\CN Project\cn_project_test\cn_project_test\Soroush\traffic_engineering")
+sys.path.append(r"C:\Users\Pratham Soneja\Documents\BITS Sem 1\ADV CN\CN Project\cn_project_test\cn_project_test\Soroush")
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np
-# sys.path.append(os.path.abspath(os.path.join('..')))
+sys.path.append(os.path.abspath(os.path.join('..')))
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "./../")))
 
 from alg import swan_max_min_approx

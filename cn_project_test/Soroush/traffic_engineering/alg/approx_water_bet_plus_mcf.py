@@ -2,7 +2,7 @@ import time
 from datetime import datetime
 
 import numpy as np
-from gurobi import *
+from gurobipy import *
 
 from alg import approx_water_bet, approx_water_plus_mcf, waterfilling_utils
 from ncflow.lib import problem
@@ -73,7 +73,7 @@ def get_rates(problem: problem.Problem, paths, path_edge_idx_mapping, path_path_
 
         # Setting up the parameters
         num_flows = len(flow_details)
-        num_flows_per_barrier = np.int(np.ceil(num_flows / num_bins))
+        num_flows_per_barrier = int(np.ceil(num_flows / num_bins))
         if num_bins > 1:
             beta = np.power(min_beta, 1/(num_bins - 1))
             epsilon = np.power(min_epsilon, 1/(num_bins - 1))

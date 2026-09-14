@@ -411,3 +411,6 @@ traffic_engineering/figs
 *.txt
 *.log
 *.json
+
+.env
+.venv

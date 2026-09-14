@@ -2,7 +2,7 @@ from collections import defaultdict
 from datetime import datetime
 
 import numpy as np
-from gurobi import *
+from gurobipy import *
 
 from ncflow.lib import problem
 

@@ -2,7 +2,7 @@ from collections import defaultdict
 from datetime import datetime
 
 import numpy as np
-from gurobi import *
+from gurobipy import *
 
 from alg import approx_waterfilling
 from ncflow.lib import problem
@@ -186,7 +186,7 @@ def compute_throughput_path_based_given_tm(flow_details, fid_to_throughput_lb, l
     num_flows = len(flow_details)
     throughput_per_flow = np.add.reduce(fid_to_throughput_lb, axis=1)
     sorted_fids = np.argsort(throughput_per_flow)
-    num_bins = np.int(np.ceil(num_flows / num_flows_per_barrier))
+    num_bins = int(np.ceil(num_flows / num_flows_per_barrier))
     additive_term = k * np.round(np.power(beta, np.arange(num_bins - 1, 0, -1)) / link_cap_scale_multiplier, round_decimal_point)
     multi_coeff_flows = np.round(np.power(epsilon, np.arange(num_bins)), round_decimal_point)
     multiplicative_term = multi_coeff_flows * (1 - alpha) + alpha

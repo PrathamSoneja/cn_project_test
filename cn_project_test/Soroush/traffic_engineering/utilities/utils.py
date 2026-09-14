@@ -13,13 +13,23 @@ from ncflow.lib import problem
 
 def find_topo_tm_fname(topo_name, tm_model):
     fname_list = []
-    topo_fname = os.path.join('..', 'ncflow', 'topologies', 'topology-zoo', topo_name)
-    for tm_fname in iglob(
-            '../ncflow/traffic-matrices/{}/{}*_traffic-matrix.pkl'.format(
-                tm_model, topo_name)):
+    
+    # Calculate absolute path to the Soroush directory dynamically
+    utils_dir = os.path.dirname(os.path.abspath(__file__))       # .../traffic_engineering/utilities
+    te_dir = os.path.dirname(utils_dir)                           # .../traffic_engineering
+    soroush_dir = os.path.dirname(te_dir)                         # .../Soroush
+    
+    ncflow_dir = os.path.join(soroush_dir, 'ncflow')
+    topo_fname = os.path.join(ncflow_dir, 'topologies', 'topology-zoo', topo_name)
+    
+    # Build absolute search pattern
+    search_pattern = os.path.join(ncflow_dir, 'traffic-matrices', tm_model, f'{topo_name}*_traffic-matrix.pkl')
+    
+    for tm_fname in iglob(search_pattern):
         vals = os.path.basename(tm_fname)[:-4].split('_')
         _, _, scale_factor = vals[1], int(vals[2]), float(vals[3])
         fname_list.append((topo_name, tm_model, scale_factor, topo_fname, tm_fname))
+        
     return fname_list
 
 
