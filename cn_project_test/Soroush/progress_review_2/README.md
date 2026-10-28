@@ -6,7 +6,7 @@ Every row is paired with a SWAN run on the same traffic-matrix file, topology, l
 
 ## Preflight
 
-The checked-in local `.venv` currently points to a removed Python 3.11 installation, so recreate it before the first solver run. Use a Python version supported by your Gurobi installation, install the project dependencies and `gurobipy`, then activate the Gurobi academic/WLS license. This environment repair is intentionally separate from the benchmark runner.
+The newest full run is already recorded at `progress_review_2/runs/20261010_185812/`. The workspace `.venv` successfully ran the extension and Gurobi on 2026-10-23; before reproducing a benchmark, verify the interpreter and solver license with the smoke slice below. Recreate the environment only if that check fails. Use a Python version supported by your Gurobi installation, install the project dependencies and `gurobipy`, and activate a valid academic/WLS license.
 
 Print the matrices that will be included without running Gurobi:
 
@@ -43,4 +43,4 @@ Each invocation creates a timestamped folder in `progress_review_2/runs/` contai
 - `median_summary.csv` - median, minimum, and maximum across repeats.
 - ECDF plots for speedup, relative total flow, and fairness plus a runtime-fairness Pareto scatter plot.
 
-The Equidepth path previously used an obsolete `gurobi` module name and NumPy's removed `np.int` alias. Both were corrected in the allocator modules so the paper's third allocator is compatible with the current dependency versions once the environment is restored.
+The Equidepth path previously used an obsolete `gurobi` module name and NumPy's removed `np.int` alias. Both were corrected in the allocator modules so the paper's third allocator is compatible with the current dependency versions.

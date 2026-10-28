@@ -4,12 +4,7 @@
 
 This is a knowledge-transfer note for the project **Soroush versus SWAN for Max-Min Fair Traffic Engineering**. It explains the project as it exists today, in plain language: the problem being solved, the code and data flow, what was completed in Milestone 1, what has been implemented for Milestone 2, what the existing results mean, and what remains before the final report.
 
-The important distinction is this:
-
-- **Milestone 1 has verified experimental results.** They compare SWAN, Geometric Binner, and Adaptive Waterfiller on four matched Uninett2010/uniform-traffic scenarios.
-- **Milestone 2 has a complete reproducible experiment framework, including Equidepth Binner, but its full 48-scenario solver run has not yet been executed on the current machine.** The local Python virtual environment must first be rebuilt because it refers to a removed Python installation.
-
-This document must not be read as claiming that the full paper-scale Milestone 2 results have already been measured.
+The current workspace contains measured results for both milestones. The newest Milestone 2 run is `progress_review_2/runs/20261010_185812/`: 48 matched topology/workload/scale scenarios, three repeats, and all nine configurations (SWAN, four GB alphas, AW, and three EB bin counts). Older timestamped folders are partial runs and must not be mixed into the full result.
 
 ## 1. Project in simple terms
 
@@ -186,37 +181,56 @@ Each full run creates `progress_review_2/runs/<timestamp>/` containing:
 | `fairness_ecdf.png` | Shows how closely each method tracks SWAN's allocations. |
 | `runtime_fairness_pareto.png` | Main trade-off figure for the presentation and report. |
 
-## 6. Current status and immediate blocker
+### Measured results and parameter choice
 
-### Where the project is now
+The newest complete run has 48 scenarios, 432 median-summary rows, and 1,296 raw runs. All 432 method/scenario groups have three repeats. The table below averages each scenario's repeat-median values equally across the 48 scenarios; speedup also includes the median across those scenarios. Fairness is the repository's geometric agreement score against SWAN, not an independent proof of max-min fairness.
 
-The project is between implementation completion and full data collection:
+| Configuration | Median speedup | Mean speedup | Relative total flow | Mean fairness | Worst scenario fairness | Mean runtime (s) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| GB, alpha=1.25 | 2.29x | 2.35x | 0.9978 | 0.9288 | 0.8026 | 23.18 |
+| GB, alpha=1.5 | 2.52x | 2.45x | 1.0006 | 0.9252 | 0.7931 | 25.83 |
+| **GB, alpha=2** | **2.89x** | **2.76x** | **1.0083** | **0.9439** | **0.8383** | **22.32** |
+| GB, alpha=4 | 2.57x | 2.67x | 1.0193 | 0.8953 | 0.6640 | 28.65 |
+| AW, water=1; bet=10 | 13.36x | 14.79x | 0.9302 | 0.9041 | 0.7480 | 3.57 |
 
-1. The Windows-compatible input discovery and SWAN/GB/AW matched baseline are working and produced verified Milestone 1 data.
-2. The Milestone 2 runner, expanded scenarios, repetitions, parameter sweeps, plots, and EB compatibility fixes are implemented.
-3. Scenario discovery has been checked: the default command resolves 48 usable topology-model-scale combinations.
-4. Python syntax validation and a no-solver scenario-selection test passed.
-5. The full solver suite has not been run since the current `.venv` references a Python 3.11 executable that is no longer installed at its recorded location.
+**Recommendation: use GB alpha=2 as the default.** It has the best median and mean speedup among the GB settings, highest mean fairness, and lowest mean runtime in this sweep. Alpha=4 carries more total flow, but is less faithful to SWAN and has a worst-scenario fairness of 0.664; it is not the balanced default. AW is the speed-oriented option: about 14.8x mean speedup, with about 7% lower mean total flow and lower fairness agreement than GB alpha=2.
 
-### What must happen before claiming Milestone 2 results
+GB alpha=2 also had the best mean fairness among the four GB settings in each of the four traffic models. In Poisson high-inter traffic, its mean fairness was 0.929, versus 0.858 for alpha=4. This supports alpha=2 beyond the overall average. The AW sweep, however, contains only one setting (`water=1; bet=10`); there is no evidence here to claim it is an optimal AW parameter choice.
 
-Rebuild the local virtual environment, install the requirements and `gurobipy`, activate a valid Gurobi license, then run a one-scenario smoke test. Only after the smoke test completes should the full suite be launched. The exact commands are documented in `progress_review_2/README.md`.
+Read the generated figures in the same folder: `speedup_ecdf.png` shows AW's clear speed advantage; `total_flow_ecdf.png` shows alpha=4 shifted toward more total flow and AW below SWAN; `fairness_ecdf.png` puts alpha=2 furthest toward SWAN agreement among GB settings; and `runtime_fairness_pareto.png` shows the trade-off, though its 48 points per configuration make it dense.
 
-Do not copy Milestone 1 numbers into a Milestone 2 table. They answer a smaller question and only support the claim that the comparison pipeline is valid.
+Two raw runtime observations exceed 500 seconds: SWAN on Cogentco/uniform/scale 64 (1,310.7 s) and GB alpha=4 on Cogentco/bimodal/scale 16 (2,581.9 s). The summary uses the median of three repeats, limiting the effect of these outliers, but the raw range should be retained and the solver/runtime anomalies investigated before making tail-latency claims. Repeats reuse the same traffic matrix and are runtime repetitions, not independent workload samples.
+
+### Extension results are a separate smoke test
+
+`extension/results.csv` contains 72 rows: six controllers over four synthetic scenarios and three epochs each. It uses a five-node toy graph, one seed per scenario, and only three epochs, so it does not extend PR2 scale or establish performance on the benchmark topologies. In this sample, actual-demand AW, periodic GB, and all hybrids have identical served demand and fairness; their average unmet demand is zero. Forecast-based GB has total unmet demand of about 266 units across the 12 scenario-epochs, concentrated in the sudden-spike, hotspot-shift, and near-saturation scenarios because its moving-average forecast lags those changes. It no longer overserves after the demand-drop scenario: forecast GB is capped at each commodity's actual demand. The adaptive controller reports zero GB reruns in every epoch, so its escalation branch has not been exercised.
+
+The extension's fairness value is agreement with periodic GB on actual demand. Its capacity-violation count is guarded by an assertion that stops the run if a violation occurs, so zero means the guard passed, not a separately estimated violation rate. The first epoch's allocation changes also count initial allocation from an empty state. The first GB invocation includes about 2.75 seconds of Gurobi startup; later epochs run in milliseconds, so the runtime chart uses per-method medians and the CSV should be used when studying cold-start latency. Treat these charts as diagnostics for controller wiring, not final comparative evidence. See `extension/README.md` for the detailed limitations.
+
+## 6. Current status and remaining work
+
+### Verified state
+
+1. Milestone 1 has four matched Uninett2010/uniform cases.
+2. The `20261010_185812` Milestone 2 folder contains the complete 48-scenario, three-repeat suite, including EB. Its configuration and raw/summary CSVs agree on coverage.
+3. The measured sweep supports GB alpha=2 as the balanced default; AW is appropriate when speed is prioritized over total flow and fairness agreement.
+4. The extension charts come from its small synthetic smoke run, not the PR2 evaluation.
+
+Remaining work: investigate the two extreme runtime observations, sweep AW's bet-iteration setting (the main PR2 data contains only `water=1; bet=10`), run a longer/more severe extension workload that exercises adaptive reruns, and carry the stated limitations into the final report. The extension plotter now uses Matplotlib directly because the installed Seaborn/Matplotlib combination failed during import.
 
 ## 7. Remaining work against the proposal
 
 | Proposal commitment | Current state | Remaining work |
 | --- | --- | --- |
 | Matched Soroush-versus-SWAN baseline | Complete and verified for four Uninett2010/uniform cases. | Keep it as a regression/smoke test. |
-| Topology and workload scaling | Framework complete. | Run the 48 scenarios and inspect failures/timeouts. |
-| Uniform, bimodal, gravity, and Poisson traffic | Framework complete. | Execute all planned traffic-model combinations. |
-| At least three repeats and median reporting | Framework complete. | Collect the three actual measurements per configuration. |
-| GB parameter sensitivity | Framework complete: alpha sweep. | Analyze whether finer bins improve fairness enough to justify runtime. |
-| Adaptive Waterfiller comparison | Present in Milestone 1 and framework. | Confirm its trade-off across large scenarios. |
-| Equidepth Binner | Compatibility work and framework support complete. | Run `--include-eb`; diagnose any solver/model failures on large cases. |
-| Combined Pareto analysis | Plot generation complete. | Interpret the full measured figures and identify non-dominated settings. |
-| Final report and reproducibility guide | Initial operational guide exists. | Write final findings only after the full outputs are available; include limitations and exact commands. |
+| Topology and workload scaling | Measured across 48 combinations. | Investigate runtime outliers and preserve the run artifacts. |
+| Uniform, bimodal, gravity, and Poisson traffic | Measured in the newest run. | Keep workload-specific results and caveats in the final report. |
+| At least three repeats and median reporting | Three repeats present for every result group. | Treat repeats as runtime repeats on the same matrix, not independent samples. |
+| GB parameter sensitivity | Alpha sweep measured. | Use alpha=2 as the balanced default; document alpha=4's throughput/fairness trade-off. |
+| Adaptive Waterfiller comparison | Measured across 48 scenarios at `water=1; bet=10`. | Present its speed advantage alongside lower total flow/fairness agreement; sweep AW settings before claiming an optimal value. |
+| Equidepth Binner | Three EB bin counts measured. | Include its runtime/quality trade-off if EB is part of the final story. |
+| Combined Pareto analysis | Figures generated from the full run. | Use the plot with the quantitative table; the 48-point scatter is dense. |
+| Final report and reproducibility guide | Initial guide and measured PR2 analysis exist. | Incorporate findings, outliers, and limitations into the final submission. |
 
 ## 8. Suggested viva / presentation explanation
 
@@ -227,7 +241,7 @@ Use this sequence when explaining the work:
 3. “We made comparisons fair by holding topology, traffic matrix, candidate paths, and capacities constant for every SWAN-Soroush pair.”
 4. “Milestone 1 verified the pipeline with real matched runs. GB retained near-SWAN throughput at about 2.7x median speedup; AW was about 9.7x faster but lost more quality under load.”
 5. “Milestone 2 expands this to different topologies, traffic types, load scales, repeated measurements, and parameter sensitivity. We added the missing EB path and make every experiment reproducible through raw CSVs and configuration snapshots.”
-6. “The remaining task is data collection and analysis, not design: rebuild the local environment, execute the planned suite, then report only measured results.”
+6. “The full planned suite has been measured. GB alpha=2 is the balanced default in this sweep; AW is the faster but lower-throughput choice. We will retain runtime outliers and clarify that the synthetic extension is still a smoke test.”
 
 ## 9. Commands to continue
 

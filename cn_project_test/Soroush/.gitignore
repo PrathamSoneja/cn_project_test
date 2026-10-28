@@ -414,3 +414,8 @@ traffic_engineering/figs
 
 .env
 .venv
+extension/.path-cache
+extension/*.csv
+extension/analysis_uninett
+extension/results_uninett_1.csv.checkpoint.pkl
+extension/*.png

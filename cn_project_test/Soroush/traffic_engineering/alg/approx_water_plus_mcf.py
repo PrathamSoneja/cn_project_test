@@ -206,17 +206,17 @@ def compute_throughput_path_based_given_tm(flow_details, fid_to_throughput_lb, l
     idx = 0
     for bin_idx in range(num_bins):
         if 0 < bin_idx < num_bins - 1:
-            m.addConstr(t_lb[bin_idx - 1], GRB.LESS_EQUAL, t_lb[bin_idx])
+            m.addLConstr(t_lb[bin_idx - 1], GRB.LESS_EQUAL, t_lb[bin_idx])
         flow_coefficient = multiplicative_term[bin_idx]
         for i in range(num_flows_per_barrier):
             fid = sorted_fids[idx]
             total_flow = flow.sum(fid, '*')
             obj += flow_coefficient * total_flow
-            m.addConstr(total_flow, GRB.LESS_EQUAL, demand_vector[fid])
+            m.addLConstr(total_flow, GRB.LESS_EQUAL, demand_vector[fid])
             if bin_idx > 0:
-                m.addConstr(total_flow, GRB.GREATER_EQUAL, t_lb[bin_idx - 1] - constants.EQUI_DEPTH_0_epsilon)
+                m.addLConstr(total_flow, GRB.GREATER_EQUAL, t_lb[bin_idx - 1] - constants.EQUI_DEPTH_0_epsilon)
             if bin_idx < num_bins - 1:
-                m.addConstr(total_flow, GRB.LESS_EQUAL, t_lb[bin_idx] + additive_term[bin_idx] + constants.EQUI_DEPTH_0_epsilon)
+                m.addLConstr(total_flow, GRB.LESS_EQUAL, t_lb[bin_idx] + additive_term[bin_idx] + constants.EQUI_DEPTH_0_epsilon)
             idx += 1
             if idx >= num_flows:
                 break
@@ -227,7 +227,7 @@ def compute_throughput_path_based_given_tm(flow_details, fid_to_throughput_lb, l
     m.setObjective(obj, GRB.MAXIMIZE)
     for e in link_src_dst_path_dict:
         sum_flow = quicksum(flow[key] for key in link_src_dst_path_dict[e])
-        m.addConstr(sum_flow, GRB.LESS_EQUAL, link_cap, name=f"capacity_{e}")
+        m.addLConstr(sum_flow, GRB.LESS_EQUAL, link_cap, name=f"capacity_{e}")
 
     # m.update()
     # print("3", (datetime.now() - st_time_model).total_seconds())

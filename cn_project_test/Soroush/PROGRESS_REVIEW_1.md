@@ -21,23 +21,29 @@ This review compares those methods on **the same inputs**, so a speed or quality
 
 ---
 
+
+
 ## What “matched” means
 
 Every SWAN–Soroush pair used:
 
-| Knob | Value used for Review I |
-| --- | --- |
-| Topology | `Uninett2010.graphml` (Internet Topology Zoo) |
-| Traffic pattern | uniform synthetic traffic matrices |
-| Scale factors | 8, 16, 32, 64 (one matrix each) |
-| Candidate paths | the **same** 16 shortest paths per pair |
-| Link capacity | 1000.0 units on every edge |
-| Demands per matrix | 5402 source–destination pairs |
-| Machine | local Windows 11 workstation, Gurobi academic license |
+
+| Knob               | Value used for Review I                               |
+| ------------------ | ----------------------------------------------------- |
+| Topology           | `Uninett2010.graphml` (Internet Topology Zoo)         |
+| Traffic pattern    | uniform synthetic traffic matrices                    |
+| Scale factors      | 8, 16, 32, 64 (one matrix each)                       |
+| Candidate paths    | the **same** 16 shortest paths per pair               |
+| Link capacity      | 1000.0 units on every edge                            |
+| Demands per matrix | 5402 source–destination pairs                         |
+| Machine            | local Windows 11 workstation, Gurobi academic license |
+
 
 That is the Progress Review I baseline: not the full paper-scale sweep yet, but a real head-to-head on identical instances.
 
 ---
+
+
 
 ## What is happening in the code
 
@@ -49,7 +55,7 @@ In order, it:
 
 1. **Finds four traffic matrices** under `ncflow/traffic-matrices/uniform/` whose names start with `Uninett2010` and whose scale is 8, 16, 32, or 64.
 2. **Computes 16 shortest paths** once on the Uninett2010 graph and reuses that path set for every algorithm and every matrix.
-3. **Runs SWAN.** SWAN builds a multi-commodity flow (MCF) model and solves it several times. In iteration `k` every unfrozen demand must send at least a lower bound and at most an upper bound. Those bounds grow as \(U, \alpha U, \alpha^2 U, \ldots\) with \(\alpha = 2\). When a demand cannot grow anymore, it is frozen at its current rate.
+3. **Runs SWAN.** SWAN builds a multi-commodity flow (MCF) model and solves it several times. In iteration `k` every unfrozen demand must send at least a lower bound and at most an upper bound. Those bounds grow as U, \alpha U, \alpha^2 U, \ldots with \alpha = 2. When a demand cannot grow anymore, it is frozen at its current rate.
 4. **Runs Geometric Binner (Soroush).** It puts each demand’s rate into geometric bins and solves **one** weighted MCF. Smaller rate pieces are weighted more heavily, which encourages max-min-like sharing without a long freeze loop.
 5. **Runs Adaptive Waterfiller (Soroush).** This does **not** call Gurobi. It waterfills on the path graph for a few iterations (`num_iter_approx=1`, `num_iter_bet=10`). It is the speed extreme of Soroush.
 6. **Records** total allocated traffic, wall-clock time, and a fairness number against SWAN.
@@ -59,6 +65,8 @@ A small code fix was required for Geometric Binner: `traffic_engineering/alg/geo
 
 ---
 
+
+
 ## How to read the plots
 
 All four figures overlay **the same four matched scenarios**.
@@ -67,7 +75,7 @@ All four figures overlay **the same four matched scenarios**.
 
 File: `progress_review_1/figs/pr1_total_flow_relative_to_swan.png`
 
-The x-axis is \(\frac{\text{total traffic allocated by the method}}{\text{total traffic allocated by SWAN}}\).
+The x-axis is \frac{\text{total traffic allocated by the method}}{\text{total traffic allocated by SWAN}}.
 
 - **1.0** means the method moved the same total volume as SWAN.
 - **Above 1.0** means more total throughput than SWAN.
@@ -81,7 +89,7 @@ The y-axis is the fraction of the four scenarios at or below that ratio (an ECDF
 
 File: `progress_review_1/figs/pr1_speedup_relative_to_swan.png`
 
-The x-axis is \(\frac{\text{SWAN runtime}}{\text{method runtime}}\) on a log scale.
+The x-axis is \frac{\text{SWAN runtime}}{\text{method runtime}} on a log scale.
 
 - **Greater than 1** means faster than SWAN.
 
@@ -105,14 +113,18 @@ For each demand we compare the two allocated rates (with a small floor so zeros 
 
 ---
 
+
+
 ## Numbers from the matched run
 
+
 | Scale | SWAN flow | SWAN time (s) | GB flow | GB time (s) | GB speedup | AW flow | AW time (s) | AW speedup |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 8 | 9930 | 8.66 | 9930 | 3.36 | 2.58× | 9900 | 0.96 | 8.99× |
-| 16 | 18847 | 8.20 | 18865 | 2.95 | 2.78× | 17142 | 1.01 | 8.08× |
-| 32 | 27319 | 10.73 | 27416 | 4.42 | 2.43× | 24468 | 1.03 | 10.44× |
-| 64 | 34166 | 11.92 | 35008 | 4.28 | 2.79× | 28984 | 0.75 | 15.90× |
+| ----- | --------- | ------------- | ------- | ----------- | ---------- | ------- | ----------- | ---------- |
+| 8     | 9930      | 8.66          | 9930    | 3.36        | 2.58×      | 9900    | 0.96        | 8.99×      |
+| 16    | 18847     | 8.20          | 18865   | 2.95        | 2.78×      | 17142   | 1.01        | 8.08×      |
+| 32    | 27319     | 10.73         | 27416   | 4.42        | 2.43×      | 24468   | 1.03        | 10.44×     |
+| 64    | 34166     | 11.92         | 35008   | 4.28        | 2.79×      | 28984   | 0.75        | 15.90×     |
+
 
 Medians across the four scenarios:
 
@@ -122,6 +134,8 @@ Medians across the four scenarios:
 The raw table is `progress_review_1/pr1_matched_results.csv`. Per-path rates and solver timings are pickled under `progress_review_1/logs/`.
 
 ---
+
+
 
 ## What this does *not* claim yet
 
@@ -140,6 +154,8 @@ The earlier smoke test compared SWAN to itself, so those ECDFs sat at 1.0 by con
 
 ---
 
+
+
 ## How to re-run
 
 From the `Soroush` folder, with the project virtual environment:
@@ -152,13 +168,18 @@ Gurobi must be licensed (an academic WLS license is already in use on this machi
 
 ---
 
+
+
 ## Files added or changed for this review
 
-| Path | Role |
-| --- | --- |
-| `PROGRESS_REVIEW_1.md` | This explanation |
-| `progress_review_1/run_pr1_matched_baseline.py` | Matched SWAN / GB / AW runner and plotter |
-| `progress_review_1/pr1_matched_results.csv` | Numeric results |
-| `progress_review_1/pr1_matched_results.json` | Same results plus timing breakdowns |
-| `progress_review_1/figs/*.png` | Overlay plots for the review slides |
+
+| Path                                                  | Role                                                     |
+| ----------------------------------------------------- | -------------------------------------------------------- |
+| `PROGRESS_REVIEW_1.md`                                | This explanation                                         |
+| `progress_review_1/run_pr1_matched_baseline.py`       | Matched SWAN / GB / AW runner and plotter                |
+| `progress_review_1/pr1_matched_results.csv`           | Numeric results                                          |
+| `progress_review_1/pr1_matched_results.json`          | Same results plus timing breakdowns                      |
+| `progress_review_1/figs/*.png`                        | Overlay plots for the review slides                      |
 | `traffic_engineering/alg/geometric_approx_binning.py` | `gurobipy` import so Geometric Binner can run on Windows |
+
+
