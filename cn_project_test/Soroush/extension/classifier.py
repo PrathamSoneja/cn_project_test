@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 
 
-class   OnlineElephantMiceClassifier:
+class OnlineElephantMiceClassifier:
     """Predict the next-epoch top-volume flows from online demand features."""
 
     def __init__(

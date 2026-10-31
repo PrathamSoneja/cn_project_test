@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+csv.field_size_limit(2**31 - 1)
 import json
 import sys
 from collections import defaultdict

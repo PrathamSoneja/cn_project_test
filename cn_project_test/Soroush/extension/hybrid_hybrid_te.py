@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+csv.field_size_limit(2**31 - 1)
 import hashlib
 import json
 import os
@@ -39,6 +40,8 @@ TOPOLOGIES = ("Uninett2010.graphml", "GtsCe.graphml", "Cogentco.graphml")
 TRAFFIC_MODELS = ("uniform", "bimodal", "gravity", "poisson-high-inter")
 LOAD_SCALES = (8.0, 16.0, 32.0, 64.0)
 SCENARIOS = ("sudden_spike", "hotspot_shift", "dcn_incast", "demand_drop")
+NORMAL_SCENARIO = "normal"
+ALL_SCENARIOS = (NORMAL_SCENARIO,) + SCENARIOS
 FAIRNESS_FLOOR = 0.1
 LINK_CAPACITY = 1000.0
 DEFAULT_EPOCHS = 15
@@ -57,6 +60,10 @@ RESULT_COLUMNS = (
     "method",
     "served_demand",
     "unmet_demand",
+    "per_flow_metrics_json",
+    "jain_index",
+    "min_served_fraction",
+    "p05_served_fraction",
     "fairness_vs_periodic_gb",
     "capacity_violations",
     "runtime_s",
@@ -203,7 +210,10 @@ class Controller:
 class Experiment:
     """Run all controller variants over a sequence of traffic matrices."""
 
-    def __init__(self, inputs, *, q=0.9, window=8, hmax=0.25, fixed_headroom=0.1):
+    def __init__(
+        self, inputs, *, q=0.9, window=8, hmax=0.25, fixed_headroom=0.1,
+        elephant_fraction=0.15, elephant_capacity_fraction=0.85,
+    ):
         self.inputs = inputs
         capacities = np.asarray(inputs.capacities, dtype=float).reshape(-1)
         edge_count = len(inputs.graph.edges())
@@ -225,6 +235,8 @@ class Experiment:
             raise ValueError("path_output must be the existing five-part TE path result")
         if window < 1 or not 0 <= q <= 1 or not 0 <= hmax <= 1 or not 0 <= fixed_headroom < 1:
             raise ValueError("invalid headroom quantile, window, or reservation fraction")
+        if not 0 < elephant_fraction <= 1 or not 0 < elephant_capacity_fraction <= 1:
+            raise ValueError("elephant fractions must be in (0, 1]")
         self.capacity = float(capacities[0])
         self.edge_pairs = list(inputs.graph.edges())
         self.edge_idx = {edge: idx for idx, edge in enumerate(self.edge_pairs)}
@@ -232,6 +244,8 @@ class Experiment:
         self.path_output = inputs.path_output
         self.q, self.window, self.hmax = q, window, hmax
         self.fixed_headroom = fixed_headroom
+        self.elephant_fraction = elephant_fraction
+        self.elephant_capacity_fraction = elephant_capacity_fraction
         self.allocator = Allocator(inputs.graph, inputs.path_output, self.capacity)
         self.controllers = {
             name: Controller(self, name) for name in METHOD_NAMES
@@ -322,6 +336,45 @@ class Experiment:
                     total += max(0.0, float(demand[src, dst]) - served.get((src, dst), 0.0))
         return total
 
+    @staticmethod
+    def _flow_metrics(demand, allocation):
+        records = []
+        fractions = []
+        for src in range(demand.shape[0]):
+            for dst in range(demand.shape[1]):
+                if src == dst:
+                    continue
+                offered = float(demand[src, dst])
+                served = float(np.sum(allocation.get((src, dst), ())))
+                fraction = served / offered if offered > 1e-9 else None
+                records.append({
+                    "src": src,
+                    "dst": dst,
+                    "offered_demand": offered,
+                    "served_rate": served,
+                    "served_fraction": fraction,
+                })
+                if fraction is not None:
+                    fractions.append(fraction)
+        values = np.asarray(fractions, dtype=float)
+        if values.size:
+            squared_sum = float(np.sum(values * values))
+            jain = (
+                float(np.sum(values) ** 2 / (values.size * squared_sum))
+                if squared_sum
+                else float("nan")
+            )
+            minimum = float(np.min(values))
+            p05 = float(np.quantile(values, 0.05))
+        else:
+            jain = minimum = p05 = float("nan")
+        return {
+            "per_flow_metrics_json": json.dumps(records, separators=(",", ":")),
+            "jain_index": jain,
+            "min_served_fraction": minimum,
+            "p05_served_fraction": p05,
+        }
+
     def _aw_delta(self, current, actual, forecast):
         result = _copy_allocation(current)
         delta = np.maximum(actual - forecast, 0.0)
@@ -348,19 +401,27 @@ class Experiment:
 
     def run_scenario(
         self, demand_matrices, forecasts, *, controller_workers=DEFAULT_CONTROLLER_WORKERS,
-        on_epoch_complete=None, on_checkpoint=None, start_epoch=0, initial_state=None
+        on_epoch_complete=None, on_checkpoint=None, start_epoch=0, initial_state=None,
+        methods=METHOD_NAMES,
     ):
         if controller_workers < 1:
             raise ValueError("controller_workers must be positive")
         if not 0 <= start_epoch <= len(demand_matrices):
             raise ValueError("start_epoch must be within the demand sequence")
+        methods = tuple(methods)
+        if not methods or any(method not in METHOD_NAMES for method in methods):
+            raise ValueError("methods must contain known controller names")
+        if "periodic_gb" not in methods:
+            raise ValueError("periodic_gb is required as the fairness reference")
         results = []
-        previous = {name: {} for name in METHOD_NAMES}
+        previous = {name: {} for name in methods}
         degrees = np.asarray(
             [self.inputs.graph.degree(node) for node in range(len(self.inputs.graph))],
             dtype=float,
         )
-        classifier = OnlineElephantMiceClassifier(demand_matrices[0], degrees)
+        classifier = OnlineElephantMiceClassifier(
+            demand_matrices[0], degrees, elephant_fraction=self.elephant_fraction
+        )
         errors = deque(maxlen=self.window)
         headroom = np.zeros(len(self.edge_pairs), dtype=float)
         self._adaptive_high_epochs = 0
@@ -412,7 +473,7 @@ class Experiment:
             ) as executor:
                 futures = [
                     executor.submit(run_controller, method)
-                    for method in METHOD_NAMES
+                    for method in methods
                 ]
                 for future in as_completed(futures):
                     method, allocation, runtime = future.result()
@@ -421,7 +482,7 @@ class Experiment:
             reference = current["periodic_gb"]
 
             epoch_results = []
-            for method in METHOD_NAMES:
+            for method in methods:
                 allocation = current[method]
                 loads = self._assert_capacity(allocation)
                 unmet = self._unmet(actual, allocation)
@@ -437,6 +498,7 @@ class Experiment:
                     "method": method,
                     "served_demand": self._served(allocation),
                     "unmet_demand": unmet,
+                    **self._flow_metrics(actual, allocation),
                     "fairness_vs_periodic_gb": self._fairness(reference, allocation),
                     "capacity_violations": int(np.count_nonzero(loads > self.capacity + 1e-6)),
                     "runtime_s": runtimes[method],
@@ -526,7 +588,7 @@ class Experiment:
             if ml_prediction is None:
                 raise ValueError("ML demand partitions are required by the ML controller")
             predicted, elephant_demand, mice_demand = ml_prediction
-            elephant_capacity = self.capacity * 0.85
+            elephant_capacity = self.capacity * self.elephant_capacity_fraction
             elephant_allocation = self._capacity_safe(
                 self.allocator.gb(elephant_demand, elephant_capacity),
                 elephant_demand,
@@ -733,7 +795,7 @@ def generate_dynamic_workload(
     seed, epochs, scenario, base_demand, paths, graph, *, scale, traffic_model
 ):
     """Create an epoch sequence with a controlled DCN traffic shift."""
-    if scenario not in SCENARIOS:
+    if scenario not in ALL_SCENARIOS:
         raise ValueError(f"Unknown scenario: {scenario}")
     rng = np.random.default_rng(seed)
     baseline = np.asarray(base_demand, dtype=float).copy()
@@ -758,7 +820,7 @@ def generate_dynamic_workload(
         noise = rng.lognormal(mean=-0.5 * noise_sigma ** 2, sigma=noise_sigma, size=baseline.shape)
         matrix = baseline * noise
         np.fill_diagonal(matrix, 0.0)
-        if epoch >= pivot:
+        if epoch >= pivot and scenario != NORMAL_SCENARIO:
             if scenario == "sudden_spike":
                 for src, dst in heavy_pairs:
                     matrix[src, dst] *= 4.0
@@ -826,6 +888,8 @@ def run_experiment(
     cache_dir=None,
     max_scenarios=0,
     controller_workers=DEFAULT_CONTROLLER_WORKERS,
+    elephant_fraction=0.15,
+    elephant_capacity_fraction=0.85,
     output_path=None,
     resume=False,
 ):
@@ -857,6 +921,8 @@ def run_experiment(
             ],
             "scenarios": list(scenarios),
             "num_paths": num_paths,
+            "elephant_fraction": elephant_fraction,
+            "elephant_capacity_fraction": elephant_capacity_fraction,
         }
         config_fingerprint = hashlib.sha256(
             json.dumps(run_config, sort_keys=True).encode("utf-8")
@@ -1019,7 +1085,13 @@ def run_experiment(
                     rows.extend(epoch_rows)
                     progress.update(scenario_index, scenario_id, epoch)
 
-                Experiment(inputs, q=0.9, window=8).run_scenario(
+                Experiment(
+                    inputs,
+                    q=0.9,
+                    window=8,
+                    elephant_fraction=elephant_fraction,
+                    elephant_capacity_fraction=elephant_capacity_fraction,
+                ).run_scenario(
                     matrices,
                     forecasts,
                     controller_workers=controller_workers,
@@ -1048,6 +1120,8 @@ def main():
     parser.add_argument("--cache-dir", type=Path, default=None)
     parser.add_argument("--max-scenarios", type=int, default=0)
     parser.add_argument("--controller-workers", type=int, default=DEFAULT_CONTROLLER_WORKERS)
+    parser.add_argument("--elephant-fraction", type=float, default=0.15)
+    parser.add_argument("--elephant-capacity-fraction", type=float, default=0.85)
     parser.add_argument(
         "--output",
         type=Path,
@@ -1065,6 +1139,8 @@ def main():
         parser.error("--epochs must be between 15 and 20")
     if args.num_paths < 1 or args.path_processors < 1 or args.controller_workers < 1:
         parser.error("--num-paths, --path-processors, and --controller-workers must be positive")
+    if not 0 < args.elephant_fraction <= 1 or not 0 < args.elephant_capacity_fraction <= 1:
+        parser.error("elephant fractions must be in (0, 1]")
     scenarios = SCENARIOS if args.scenario == "all" else (args.scenario,)
     results = run_experiment(
         seed=args.seed,
@@ -1078,6 +1154,8 @@ def main():
         cache_dir=args.cache_dir,
         max_scenarios=args.max_scenarios,
         controller_workers=args.controller_workers,
+        elephant_fraction=args.elephant_fraction,
+        elephant_capacity_fraction=args.elephant_capacity_fraction,
         output_path=args.output,
         resume=args.resume,
     )
@@ -1085,11 +1163,14 @@ def main():
     summary = results.groupby(["topology", "traffic_model", "scale_factor", "scenario", "method"], as_index=False).agg(
         served_demand=("served_demand", "mean"),
         unmet_demand=("unmet_demand", "mean"),
+        jain_index=("jain_index", "mean"),
+        min_served_fraction=("min_served_fraction", "mean"),
+        p05_served_fraction=("p05_served_fraction", "mean"),
         fairness_vs_periodic_gb=("fairness_vs_periodic_gb", "mean"),
         capacity_violations=("capacity_violations", "sum"),
         runtime_s=("runtime_s", "mean"),
         allocation_changes=("allocation_changes", "sum"),
-        gb_reruns=("gb_reruns", "max"),
+        gb_reruns=("gb_reruns", "sum"),
     )
     print(summary.to_string(index=False, float_format=lambda value: f"{value:.3f}"))
     if args.plot:

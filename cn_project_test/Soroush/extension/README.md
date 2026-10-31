@@ -54,10 +54,22 @@ checkpoint support was added cannot be resumed exactly on its own.
 
 Each CSV row contains per-epoch served/unmet demand, fairness against periodic
 GB, capacity violations, runtime, allocation churn, topology, traffic model,
-scale, and shift. Run `analyze_results.py` after the experiment to generate
-plots and a separate `median_summary.csv`, with median epoch metrics for each
-scenario/controller, similar to the PR2 output structure. The raw
-`results.csv` remains per-epoch data and is not mixed with summary metrics.
+scale, and shift. Per-OD offered demand, served rate, and served fraction are
+stored in `per_flow_metrics_json`; Jain index, minimum served fraction, and
+the 5th-percentile served fraction are separate scalar columns. The flow
+fairness metrics use positive-offer OD pairs, include zero-served flows, and
+are independent of the allocation-similarity score against periodic GB.
+`fairness_vs_periodic_gb` is not exact max-min fairness, and periodic GB's
+score of 1.0 is true by definition. B4/B4+ churn is measured against the
+previous epoch and preserved across sweep checkpoints.
+
+Run `analyze_results.py` after the experiment to generate plots and a separate
+`median_summary.csv`, with median epoch metrics for each scenario/controller,
+similar to the PR2 output structure. The raw `results.csv` remains per-epoch
+data and is not mixed with summary metrics. Scenario plots aggregate the epoch
+measurements by mean; topology runtime comparisons use median runtime. Runs
+created with the earlier CSV schema cannot be resumed with the new schema;
+use a new output file/directory for a fresh run.
 Scenario plots aggregate the epoch measurements by mean; topology runtime
 comparisons use median runtime.
 
@@ -70,9 +82,10 @@ The controllers are:
 5. `hybrid_fixed`: forecast GB with 10% fixed headroom plus reactive AW.
 6. `hybrid_adaptive`: forecast GB with an 8-epoch, 90th-percentile
    headroom estimate and escalation re-solve.
-7. `hybrid_ml_elephant_mice`: GB on the predicted top 15% of flows using
-   85% reserved capacity, AW for predicted mice over remaining capacity, and
-   reactive AW for positive actual-versus-predicted demand.
+7. `hybrid_ml_elephant_mice`: GB on the predicted top 15% of active flows,
+   initially using 85% of link capacity; AW serves predicted mice from residual
+   capacity, then reacts to positive actual-versus-predicted demand. The flow
+   fraction and elephant capacity fraction are separate parameters.
 
 `classifier.py` implements an online quantile classifier using EWMA demand
 (`beta=0.7`), first-order momentum, rolling variance (`W=5`), and endpoint
@@ -80,17 +93,100 @@ degree centrality. Its prediction is updated only after an epoch is observed.
 The experiment's moving-average forecast and adaptive headroom window are
 both eight epochs.
 
-Generate the three requested figures and median summary from the per-epoch CSV:
+Run a small serial comparison with the split configurable:
 
 ```powershell
-python analyze_results.py
+python hybrid_hybrid_te.py --topologies Uninett2010.graphml --traffic-models uniform --scales 8 --scenario sudden_spike --controller-workers 1 --output baseline_small.csv
 ```
 
-This writes `unmet_demand_by_scenario.png`, `fairness_by_scenario.png`, and
-`runtime_by_topology.png`. The unmet-demand plot uses scale-64 records when
-available; the fairness and runtime plots aggregate by shift and topology.
-Figures report measured results and do not imply a fairness or runtime target
-was achieved unless the resulting CSV supports that conclusion.
+Sweep the two split parameters against periodic GB on the same case:
+
+```powershell
+python grid_search_elephant_mice.py --elephant-fractions 0.10,0.15,0.20 --capacity-fractions 0.70,0.85,0.95
+```
+
+The grid search writes raw epoch metrics, median summaries, and a config file
+under `grid_runs/`. It is a parameter search, not a trained policy; use held-out
+seeds and scenarios before claiming the chosen split generalizes.
+
+Compare all seven extension controllers with the repository's B4/B4+
+implementations on one shared workload, path set, and capacity:
+
+```powershell
+python compare_hybrid_baselines.py --topology Uninett2010.graphml --traffic-model uniform --scale 8 --scenario sudden_spike --controller-workers 1 --runtime-repeats 3
+```
+
+The comparison writes per-epoch and median CSVs plus a config under
+`comparison_runs/`. Runtime is measured in separate serial repeats; B4/B4+ are
+the repository implementations of the WAN baseline, not learned or tuned
+settings. The results describe only the selected case and do not establish
+generalization.
+
+For a practical first research screening run, the default suite samples one
+traffic matrix for each of the four traffic models at scale 32, then tests
+`normal` plus all four dynamic scenarios. It compares all seven extension
+controllers plus repository B4 and B4+ (20 matched cases, 15 epochs each).
+The defaults use three candidate paths. All methods still use the same paths
+and inputs within each case. Each controller's runtime is measured separately
+during the serial quality pass, avoiding a second allocation run. For more
+stable timing measurements at roughly twice the allocation cost, add
+`--runtime-repeats 1`. `--controller-workers 1` is required:
+
+```powershell
+python run_uninett_sweep.py --output uninett_screening
+```
+
+The runner writes `per_epoch.csv` after every completed epoch and an atomic
+`checkpoint.pkl`, so a failure can be resumed with exactly the same arguments:
+separate terminal progress bars show quality-epoch and repeated-runtime
+progress, with an ETA for the remaining work.
+
+```powershell
+python run_uninett_sweep.py --output uninett_screening --resume
+```
+
+Do not change the workload, epoch, path, matrix-selection, sample count, seed,
+or repeat settings when resuming. Each epoch uses the same demands, paths, and
+capacities for all methods; fairness is measured against periodic GB on actual
+demand. The `normal` case uses the ordinary noisy workload without a controlled
+shift. Sampling is deterministic for the supplied seed. This is a screening
+study, not a final statistical claim: use more matrices and more paths for
+follow-up confirmation.
+
+To increase load coverage to 16, 32, and 64 (60 cases with one sampled matrix
+per model/scale), use:
+
+```powershell
+python run_uninett_sweep.py --scales 16,32,64 --output uninett_load_screening
+```
+
+For the full available Uninett matrix suite at all four standard scales (400
+cases), use `--scales 8,16,32,64 --matrix-selection all`. This larger sweep is
+intended for extended compute time.
+
+On completion, the runner creates `summary.csv`, `median_summary.csv`, and
+`runtime_benchmarks.csv`, plus graphs in the output directory: unmet demand,
+fairness, runtime by topology, capacity violations, fairness by scale, and
+runtime by scale. `per_epoch.csv` records the per-controller serial runtime. The benchmark CSV
+contains runtime medians from the separate serial repeats when enabled, or
+copies the quality-pass timing when `--runtime-repeats 0`; report graphs use it
+when available. The plots
+summarize the CSVs; they do not imply a target was achieved. To regenerate the
+reports after inspecting or changing the CSVs:
+
+```powershell
+python analyze_results.py --input uninett_full_run\per_epoch.csv --output-dir uninett_full_run
+```
+
+For a quick pipeline/resume validation, select one normal-workload case:
+
+```powershell
+python run_uninett_sweep.py --traffic-models uniform --scales 32 --scenarios normal --matrix-selection first --epochs 1 --num-paths 3 --path-processors 1 --controller-workers 1 --runtime-repeats 1 --output uninett_smoke
+```
+
+B4/B4+ refer to the repository implementations of the established WAN
+baseline; their settings are not described as learned. Results from one
+topology or run should not be generalized beyond the measured cases.
 
 The existing TE GB/AW adapters accept a scalar link capacity. The runner
 therefore uses uniform 1000 Mbps links, matching the Topology Zoo loader.

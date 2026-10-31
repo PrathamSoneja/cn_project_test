@@ -8,6 +8,7 @@ Writes a CSV, overlay plots, and a JSON summary used by the write-up.
 from __future__ import annotations
 
 import csv
+csv.field_size_limit(2**31 - 1)
 import json
 import os
 import sys

@@ -64,7 +64,7 @@ def get_rates(problem: Problem, num_paths_per_flow, link_cap, path_characteristi
         starting_v_lid = true_links.shape[0]
         if np.any(all_demand_constraint_flows[starting_v_lid:]):
             desired_lids = starting_v_lid + np.where(all_demand_constraint_flows[starting_v_lid:])[0]
-            rate = np.zeros_like(np_sub_flow_list, dtype=np.float)
+            rate = np.zeros_like(np_sub_flow_list, dtype=float)
             # print(np.count_nonzero(reshaped_active_sub_flow), np.count_nonzero(which_sub_flow_active), num_flows)
             # print(true_links.shape, starting_v_lid, len(problem.G.edges))
             # print(desired_lids.shape)

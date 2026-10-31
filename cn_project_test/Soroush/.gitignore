@@ -419,3 +419,15 @@ extension/*.csv
 extension/analysis_uninett
 extension/results_uninett_1.csv.checkpoint.pkl
 extension/*.png
+
+# Local experiment outputs and checkpoints
+uninett_runs/
+comparison_runs/
+grid_runs/
+**/per_epoch.csv
+**/results.csv
+**/summary.csv
+**/median_summary.csv
+**/runtime_benchmarks.csv
+**/checkpoint.pkl
+**/*.pkl

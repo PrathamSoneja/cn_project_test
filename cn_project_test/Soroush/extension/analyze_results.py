@@ -16,9 +16,13 @@ METRICS = {
 EPOCH_SUMMARY_METRICS = (
     "served_demand",
     "unmet_demand",
+    "jain_index",
+    "min_served_fraction",
+    "p05_served_fraction",
     "fairness_vs_periodic_gb",
     "capacity_violations",
     "runtime_s",
+    "runtime_benchmark_s",
     "allocation_changes",
     "gb_reruns",
 )
@@ -27,6 +31,40 @@ EPOCH_SUMMARY_METRICS = (
 def load_results(csv_path: Path) -> pd.DataFrame:
     """Load aggregates or summarize the extension's per-epoch CSV."""
     frame = pd.read_csv(csv_path)
+    runtime_path = csv_path.parent / "runtime_benchmarks.csv"
+    if runtime_path.is_file() and {"scenario_id", "epoch", "method"} <= set(frame.columns):
+        runtime = pd.read_csv(runtime_path)
+        runtime_columns = {
+            "scenario_id",
+            "epoch",
+            "method",
+            "runtime_benchmark_s",
+        }
+        missing_runtime = runtime_columns - set(runtime.columns)
+        if missing_runtime:
+            raise ValueError(
+                "Runtime benchmark CSV is missing columns: "
+                + ", ".join(sorted(missing_runtime))
+            )
+        frame = frame.merge(
+            runtime[
+                [
+                    "scenario_id",
+                    "epoch",
+                    "method",
+                    "runtime_benchmark_s",
+                ]
+            ],
+            on=["scenario_id", "epoch", "method"],
+            how="left",
+            validate="one_to_one",
+        )
+        frame["runtime_benchmark_s"] = pd.to_numeric(
+            frame["runtime_benchmark_s"], errors="raise"
+        )
+        frame["avg_runtime"] = frame["runtime_benchmark_s"].fillna(
+            pd.to_numeric(frame["runtime_s"], errors="raise")
+        )
     required = {"scenario", "method"}
     missing = required - set(frame.columns)
     if missing:
@@ -123,7 +161,7 @@ def _save_grouped_bar(
 
 
 def create_figures(frame: pd.DataFrame, output_dir: Path) -> list[Path]:
-    """Write unmet-demand, fairness, and runtime charts."""
+    """Write controller-comparison charts from per-epoch or aggregate results."""
     output_dir.mkdir(parents=True, exist_ok=True)
     plt.rcParams.update(
         {
@@ -137,6 +175,7 @@ def create_figures(frame: pd.DataFrame, output_dir: Path) -> list[Path]:
         output_dir / "unmet_demand_by_scenario.png",
         output_dir / "fairness_by_scenario.png",
         output_dir / "runtime_by_topology.png",
+        output_dir / "capacity_violations_by_scenario.png",
     ]
     scenario_frame = frame
     if "scale_factor" in frame.columns:
@@ -160,6 +199,20 @@ def create_figures(frame: pd.DataFrame, output_dir: Path) -> list[Path]:
         paths[1],
         ylim=(0.0, 1.05),
     )
+    if "capacity_violations" in frame.columns:
+        frame["avg_capacity_violations"] = pd.to_numeric(
+            frame["capacity_violations"], errors="raise"
+        )
+        _save_grouped_bar(
+            frame,
+            "avg_capacity_violations",
+            "scenario",
+            "Capacity violations by scenario and controller",
+            "Mean link-capacity violations per epoch",
+            paths[3],
+        )
+    else:
+        paths.pop()
 
     runtime_frame = frame.copy()
     if "topology" not in runtime_frame.columns:
@@ -185,6 +238,75 @@ def create_figures(frame: pd.DataFrame, output_dir: Path) -> list[Path]:
     ax.legend(title="Method", bbox_to_anchor=(1.02, 1), loc="upper left", frameon=False)
     fig.savefig(paths[2], dpi=300, bbox_inches="tight")
     plt.close(fig)
+
+    if "scale_factor" in frame.columns:
+        for metric, filename, title, ylabel, logarithmic in (
+            (
+                "avg_fairness",
+                "fairness_by_scale.png",
+                "Fairness fidelity across load scales",
+                "Median fairness vs. periodic GB",
+                False,
+            ),
+            (
+                "avg_runtime",
+                "runtime_by_scale.png",
+                "Serial runtime across load scales",
+                "Median runtime per epoch (seconds)",
+                True,
+            ),
+        ):
+            scale_path = output_dir / filename
+            scenarios = list(dict.fromkeys(frame["scenario"].astype(str)))
+            columns = 2
+            rows = (len(scenarios) + columns - 1) // columns
+            fig, axes = plt.subplots(
+                rows,
+                columns,
+                figsize=(14, 4.2 * rows),
+                squeeze=False,
+                constrained_layout=True,
+            )
+            grouped = (
+                frame.groupby(["scenario", "scale_factor", "method"], dropna=False)[metric]
+                .median()
+                .reset_index()
+            )
+            for index, scenario in enumerate(scenarios):
+                ax = axes.flat[index]
+                subset = grouped.loc[grouped["scenario"].astype(str) == scenario]
+                for method, method_rows in subset.groupby("method", sort=False):
+                    method_rows = method_rows.sort_values("scale_factor")
+                    ax.plot(
+                        method_rows["scale_factor"],
+                        method_rows[metric],
+                        marker="o",
+                        label=method,
+                    )
+                ax.set(
+                    title=scenario.replace("_", " ").title(),
+                    xlabel="Load scale",
+                    ylabel=ylabel,
+                )
+                if logarithmic:
+                    ax.set_yscale("log")
+                ax.grid(True, alpha=0.25)
+            for ax in axes.flat[len(scenarios):]:
+                ax.remove()
+            handles, labels = axes.flat[0].get_legend_handles_labels()
+            if handles:
+                fig.legend(
+                    handles,
+                    labels,
+                    title="Method",
+                    loc="center left",
+                    bbox_to_anchor=(1.0, 0.5),
+                    frameon=False,
+                )
+            fig.suptitle(title, fontweight="bold")
+            fig.savefig(scale_path, dpi=250, bbox_inches="tight")
+            plt.close(fig)
+            paths.append(scale_path)
     return paths
 
 
